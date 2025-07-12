@@ -129,11 +129,11 @@ class TorchTensor:
                 np.save(fout, np_array)
         else:
             if self.device.device_type == DeviceType.COMPRESSED:
-                tmp = torch.from_numpy(np_array)
+                tmp = torch.from_numpy(np_array).to(torch.bfloat16)
                 tmp = global_cpu_device.compressed_device.compress(tmp, self.data[2])
                 general_copy(self, None, tmp, None)
             else:
-                self.data.copy_(torch.from_numpy(np_array))
+                self.data.copy_(torch.from_numpy(np_array).to(torch.bfloat16))
 
     def load_from_np_file(self, filename):
         if self.device.device_type == DeviceType.DISK:
