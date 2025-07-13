@@ -42,7 +42,7 @@ class ExecutionEnv:
     @classmethod
     def create(cls, offload_dir):
         # fix recursive import
-        from flexllmgen.pytorch_backend import TorchDevice, TorchDisk, TorchMixedDevice
+        from flexllmgen.pytorch_backend_llama import TorchDevice, TorchDisk, TorchMixedDevice
         gpu = TorchDevice("cuda:0")
         cpu = TorchDevice("cpu")
         disk = TorchDisk(offload_dir)
@@ -64,9 +64,9 @@ class BenchmarkResult:
 
 
 np_dtype_to_torch_dtype = {
-    np.float16: torch.float16, np.float32: torch.float32, np.uint8: torch.uint8,
+    np.float16: torch.bfloat16, np.float32: torch.float32, np.uint8: torch.uint8,
     np.int8: torch.int8, np.int32: torch.int32, np.int64: torch.int64,
-    bool: torch.bool,
+    bool: torch.bool, torch.bfloat16: torch.bfloat16
 }
 
 torch_dtype_to_np_dtype = {

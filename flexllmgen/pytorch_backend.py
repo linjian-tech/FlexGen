@@ -333,6 +333,7 @@ class TorchDevice:
         # shape: (b, 1, s, s)
         idx = torch.arange(s, device=self.dev)
         causal_mask = (idx <= idx.view(s, 1)).view(1, 1, s, s)
+        print(attention_mask.data.view(b, 1, 1, s))
         mask = attention_mask.data.view(b, 1, 1, s) & causal_mask
 
         # shape: (b, n_head, s, s)

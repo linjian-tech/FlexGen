@@ -3,8 +3,8 @@ import dataclasses
 import torch
 import numpy as np
 
-from flexllmgen.pytorch_backend import (TorchTensor, TorchDevice,
-    DeviceType, general_copy, fix_recursive_import)
+from flexllmgen.pytorch_backend_llama import (TorchTensor, TorchDevice,
+                                              DeviceType, general_copy, fix_recursive_import)
 from flexllmgen.utils import np_dtype_to_torch_dtype
 
 

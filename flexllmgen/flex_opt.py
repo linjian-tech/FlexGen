@@ -17,8 +17,8 @@ from transformers import AutoTokenizer
 
 from flexllmgen.compression import CompressionConfig
 from flexllmgen.opt_config import OptConfig, get_opt_config, download_opt_weights
-from flexllmgen.pytorch_backend import (TorchDevice, TorchDisk, TorchLink,
-    TorchMixedDevice, DeviceType, general_copy, fix_recursive_import)
+from flexllmgen.pytorch_backend_llama import (TorchDevice, TorchDisk, TorchLink,
+                                              TorchMixedDevice, DeviceType, general_copy, fix_recursive_import)
 from flexllmgen.timer import timers
 from flexllmgen.utils import (Task, ExecutionEnv, GB, T, ValueHolder,
     array_1d, array_2d, array_3d, str2bool, project_decode_latency,
@@ -29,7 +29,9 @@ fix_recursive_import()
 
 DUMMY_WEIGHT = "_DUMMY_"  # Use dummy weights for benchmark purposes
 
-
+tokenizer = AutoTokenizer.from_pretrained("facebook/opt-30b", padding_side="left")
+import os
+os.environ['HF_HOME'] = '/media/hongzicong/volumn1/model_downloading'
 @dataclasses.dataclass(frozen=True)
 class Policy:
     gpu_batch_size: int
@@ -776,6 +778,9 @@ class OptLM:
                 stopped[:] = np.logical_or(stopped, ids == self.task.stop)
             else:
                 self.output_ids[left:right, pos:pos+1] = ids
+            # temp_number = self.output_ids[left:right, pos:pos+1] # return 2d list
+            current_token= tokenizer.decode(self.output_ids[left:right, pos:pos+1][0], skip_special_tokens=True)
+            print(current_token, end="", flush=True)
         else:  # move to home
             x = self.hidden[i][j][k]
             if x.val:  # x may already be moved due to overlapping
@@ -1228,6 +1233,9 @@ def run_flexllmgen(args):
         output_ids = model.generate(
             inputs, max_new_tokens=args.gen_len,
             debug_mode=args.debug_mode, cut_gen_len=cut_gen_len, verbose=args.verbose)
+
+        text = tokenizer.decode(output_ids[0], skip_special_tokens=True)
+        print(text)
         costs = timers("generate").costs
     finally:
         env.close_copy_threads()
@@ -1280,13 +1288,13 @@ def add_parser_arguments(parser):
              "FlexLLMGen will automatically download them from HuggingFace.")
     parser.add_argument("--offload-dir", type=str, default="~/flexllmgen_offload_dir",
         help="The directory to offload tensors. ")
-    parser.add_argument("--prompt-len", type=int, default=512)
-    parser.add_argument("--gen-len", type=int, default=32)
+    parser.add_argument("--prompt-len", type=int, default=128)
+    parser.add_argument("--gen-len", type=int, default=128)
     parser.add_argument("--cut-gen-len", type=int,
         help="Cut generation length for fast debugging.")
     parser.add_argument("--debug-mode", type=str,
         choices=["fewer_batch", "breakdown"])
-    parser.add_argument("--gpu-batch-size", type=int, default=4)
+    parser.add_argument("--gpu-batch-size", type=int, default=1)
     parser.add_argument("--num-gpu-batches", type=int, default=1)
     parser.add_argument("--percent", nargs="+", type=int,
         default=[100, 0, 100, 0, 100, 0],

@@ -17,8 +17,8 @@ from flexllmgen.flex_opt import (Policy, InputEmbed, OutputEmbed, SelfAttention,
                               add_parser_arguments, get_test_inputs,
                               DUMMY_WEIGHT)
 from flexllmgen.opt_config import get_opt_config
-from flexllmgen.pytorch_backend import (TorchDevice, TorchDisk, TorchLink,
-    TorchMixedDevice, TorchTensor)
+from flexllmgen.pytorch_backend_llama import (TorchDevice, TorchDisk, TorchLink,
+                                              TorchMixedDevice, TorchTensor)
 from flexllmgen.timer import timers
 from flexllmgen.utils import (Task, ExecutionEnv, GB, T, ValueHolder,
     array_1d, array_2d, array_3d, array_4d, str2bool, project_decode_latency)

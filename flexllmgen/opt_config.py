@@ -13,6 +13,8 @@ import shutil
 import numpy as np
 from tqdm import tqdm
 
+# import os
+# os.environ['HF_HOME'] = '/media/hongzicong/volumn1/model_downloading'
 
 @dataclasses.dataclass(frozen=True)
 class OptConfig:
@@ -254,10 +256,66 @@ def download_opt_weights(model_name, path):
                     "decoder.embed_tokens.weight", "lm_head.weight"))
 
 
+from safetensors import safe_open
+def download_llama_weights(model_name, path):
+    '''
+        model_name: target model path in HuggingFace Hub
+        path: path to locally stored the model paraemters
+    '''
+    from huggingface_hub import snapshot_download
+    import torch
+
+    print(f"Load the pre-trained pytorch weights of {model_name} from huggingface. "
+          f"The downloading and cpu loading can take dozens of minutes. "
+          f"If it seems to get stuck, you can monitor the progress by "
+          f"checking the memory usage of this process.")
+
+    # if "opt" in model_name:
+    #     hf_model_name = "facebook/" + model_name
+    # elif "galactica" in model_name:
+    #     hf_model_name = "facebook/" + model_name
+    hf_model_name = model_name
+
+    folder = snapshot_download(hf_model_name, allow_patterns="*.safetensors")
+    safetensor_files = glob.glob(os.path.join(folder, "*.safetensors"))
+
+
+    if not safetensor_files:
+        print("No .safetensors found, fall back to .bin")
+        folder = snapshot_download(hf_model_name, allow_patterns="*.bin")
+        safetensor_files = glob.glob(os.path.join(folder, "*.bin"))
+
+    if "/" in model_name:
+        model_name = model_name.split("/")[1].lower()
+    path = os.path.join(path, f"{model_name}-np")
+    path = os.path.abspath(os.path.expanduser(path))
+    os.makedirs(path, exist_ok=True)
+
+    for safetensor_file in tqdm(safetensor_files, desc="Convert format"):
+        if safetensor_file.endswith(".safetensors"):
+            with safe_open(safetensor_file, framework="pt") as f:
+                state = {key: f.get_tensor(key) for key in f.keys()}
+        else:
+            state = torch.load(safetensor_file)
+
+        for name, param in tqdm(state.items(), leave=False):
+            name = name.replace("model.", "")
+            name = name.replace("decoder.final_layer_norm", "decoder.layer_norm")
+            param_path = os.path.join(path, name)
+            with open(param_path, "wb") as f:
+                np.save(f, param.cpu().detach().to(torch.float32).numpy())
+
+            # shared embedding
+            if "decoder.embed_tokens.weight" in name:
+                raise ValueError("Cannot convert .safetensors to .bin")
+                shutil.copy(param_path, param_path.replace(
+                    "decoder.embed_tokens.weight", "lm_head.weight"))
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str)
-    parser.add_argument("--path", type=str, default="~/opt_weights")
+    parser.add_argument("--model", type=str, default="gradientai/Llama-3-8B-Instruct-Gradient-1048k")
+    parser.add_argument("--path", type=str, default="~/llama_weights")
     args = parser.parse_args()
 
-    download_opt_weights(args.model, args.path)
+    download_llama_weights(args.model, args.path)
