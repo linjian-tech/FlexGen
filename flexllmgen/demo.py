@@ -7,6 +7,8 @@ from transformers.models.llama.modeling_llama import LlamaAttention
 import os
 os.environ['HF_HOME'] = '/media/hongzicong/volumn1/model_downloading'
 # 设置模型名称
+import os
+print("HF_HOME:", os.environ.get('HF_HOME'))
 model_name = "gradientai/Llama-3-8B-Instruct-Gradient-1048k"
 config = LlamaConfig.from_pretrained(model_name)
 print(config)
@@ -22,7 +24,8 @@ tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
     torch_dtype=torch.float16,
-    device_map="auto"
+    device_map="auto",
+    cache_dir="/media/hongzicong/volumn1/model_downloading"
 )
 prompt = "Can you tell me a joke?"
 inputs = tokenizer(prompt, return_tensors="pt").to(model.device)

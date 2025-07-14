@@ -14,13 +14,13 @@ import numpy as np
 from tqdm import tqdm
 import torch
 from transformers import AutoTokenizer
-from transformers import LlamaConfig
+from transformers import Qwen3Config
 from transformers.activations import ACT2FN
-from transformers.models.llama.modeling_llama import LlamaRotaryEmbedding
+from transformers.models.qwen3.modeling_qwen3 import Qwen3RotaryEmbedding
 
 from flexllmgen.compression import CompressionConfig
-from flexllmgen.opt_config import OptConfig, get_opt_config, download_llama_weights
-from flexllmgen.pytorch_backend_llama import (TorchDevice, TorchDisk, TorchLink,
+from flexllmgen.opt_config import OptConfig, get_opt_config, download_weights
+from flexllmgen.pytorch_backend_qwen import (TorchDevice, TorchDisk, TorchLink,
     TorchMixedDevice, DeviceType, general_copy, fix_recursive_import)
 from flexllmgen.timer import timers
 from flexllmgen.utils import (Task, ExecutionEnv, GB, T, ValueHolder,
@@ -28,14 +28,13 @@ from flexllmgen.utils import (Task, ExecutionEnv, GB, T, ValueHolder,
     torch_mem_stats, torch_dtype_to_np_dtype, write_benchmark_log,
     read_benchmark_log)
 
-tokenizer = AutoTokenizer.from_pretrained("gradientai/Llama-3-8B-Instruct-Gradient-1048k")
+tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-8B")
 
 fix_recursive_import()
 
 DUMMY_WEIGHT = "_DUMMY_"  # Use dummy weights for benchmark purposes
 
-import os
-os.environ['HF_HOME'] = '/media/hongzicong/volumn1/model_downloading'
+
 
 @dataclasses.dataclass(frozen=True)
 class Policy:
@@ -314,12 +313,15 @@ class SelfAttention:
             ((h,), dtype, path + "input_layernorm.weight"),
             # b_ln
             # ((h,), dtype, path + "_layer_norm.bias"),
+            # unique norm
+            ((self.head_dim,), dtype, path + "self_attn.q_norm.weight"),
+            ((self.head_dim,), dtype, path + "self_attn.k_norm.weight"),
         ]
         weights = init_weight_list(weight_specs, self.policy, self.env)
         weight_home.store(weights)
 
     def load_weight(self, weight_home, weight_read_buf, k):
-        w_q, w_k, w_v, w_out, w_ln = weight_home.val
+        w_q, w_k, w_v, w_out, w_ln, q_ln, k_ln = weight_home.val
         if k == 0:
             dst1 = self.weight_load_dst
             dst2 = self.compute
@@ -328,7 +330,9 @@ class SelfAttention:
                 w_k.smart_copy(dst1),
                 w_v.smart_copy(dst1),
                 w_out.smart_copy(dst1),
-                w_ln.smart_copy(dst2),))
+                w_ln.smart_copy(dst2),
+                q_ln.smart_copy(dst2),
+                k_ln.smart_copy(dst2),))
 
     def init_cache_one_gpu_batch(self, cache_home):
         if self.policy.cache_gpu_percent == 100:
@@ -440,31 +444,31 @@ class SelfAttention:
                 cache_write_buf, i, k, position_embeddings):
         n_head = self.config.num_attention_heads
 
-        donate = [False] * 9
+        donate = [False] * 11
         h, donate[0] = hidden.val, True
 
         if k == self.policy.num_gpu_batches - 1:
             # Clear the weight_read_buf if it is the last gpu batch
             ((w_q, donate[2]), (w_k, donate[3]),
              (w_v, donate[4]), (w_out, donate[5]),
-             (w_ln, donate[6])) = weight_read_buf.pop()
+             (w_ln, donate[6]),(q_ln, donate[7]),(k_ln, donate[8])) = weight_read_buf.pop()
         else:
             ((w_q, _), (w_k, _),
              (w_v, _), (w_out, _),
-             (w_ln, _),) = weight_read_buf.val
+             (w_ln, _), (q_ln, _),(k_ln, _)) = weight_read_buf.val
 
         if i == 0:  # prefill
             mask, donate[1] = attention_mask.val.smart_copy(self.compute)
             h, new_k_cache, new_v_cache = self.compute.mha(h, mask, w_q,
-                w_k, w_v,  w_out,  w_ln,  n_head, donate,
+                w_k, w_v,  w_out,  w_ln,  q_ln, k_ln, n_head, donate,
                 self.policy.compress_cache, self.policy.comp_cache_config,
                 self.config.rms_norm_eps, self.head_dim, self.num_key_value_groups, self.num_key_value_heads, position_embeddings)
             cache_write_buf.store((new_k_cache, new_v_cache))
         else:  # decoding
             mask, donate[1] = attention_mask.val.smart_copy(self.attention_compute)
-            (k_cache, donate[7]), (v_cache, donate[8]) = cache_read_buf.pop()
+            (k_cache, donate[9]), (v_cache, donate[10]) = cache_read_buf.pop()
             h, new_k_cache, new_v_cache = self.compute.mha_gen(h, mask, w_q,
-                 w_k, w_v, w_out,  w_ln, n_head,
+                 w_k, w_v, w_out,  w_ln, q_ln, k_ln, n_head,
                 k_cache, v_cache, donate, self.policy.attn_sparsity,
                 self.policy.compress_cache, self.policy.comp_cache_config,
                 self.config.rms_norm_eps, self.head_dim, self.num_key_value_groups, self.num_key_value_heads, position_embeddings)
@@ -601,7 +605,7 @@ class TransformerLayer:
 
 class OptLM:
     def __init__(self,
-                 config: LlamaConfig,
+                 config: Qwen3Config,
                  env: ExecutionEnv,
                  model: str,
                  local_model_path: str,
@@ -618,7 +622,7 @@ class OptLM:
         self.position_embeddings = None
         self.config.pad_token_id = -1
         self.config.torch_dtype = np.float16
-        self.rotary_emb = LlamaRotaryEmbedding(config=config)
+        self.rotary_emb = Qwen3RotaryEmbedding(config=config)
         self.local_model_path = local_model_path
 
         layers = []
@@ -675,7 +679,7 @@ class OptLM:
             os.path.join(self.path, f"{self.model}-np")))
         check_path = os.path.join(expanded_path, "embed_tokens.weight")
         if not os.path.exists(check_path) and DUMMY_WEIGHT not in check_path:
-            download_llama_weights(self.model, self.local_model_path, self.path)
+            download_weights(self.model, self.local_model_path, self.path)
 
         self.layers[j].init_weight(self.weight_home[j], expanded_path)
 
@@ -1221,7 +1225,7 @@ def get_filename(args):
 
 
 def get_test_inputs(prompt_len, num_prompts, tokenizer):
-    prompts = ["Can you tell me a joke?"]
+    prompts = ["请告诉我一个关于人工智能的有趣事实。"]
     input_ids = tokenizer(prompts).input_ids
     return (input_ids[0],) * num_prompts
 
@@ -1267,9 +1271,9 @@ def run_flexllmgen(args):
     #       f"hidden size (prefill): {hidden_size/GB:.3f} GB")
 
     print("init weight...")
-    llama_config = LlamaConfig.from_pretrained(args.model)
+    qwen_config = Qwen3Config.from_pretrained(args.model)
     model_name = args.model.split("/")[1].lower()
-    model = OptLM(llama_config, env, model_name, args.local_model_path, args.path, policy)
+    model = OptLM(qwen_config, env, model_name, args.local_model_path, args.path, policy)
 
     try:
         print("warmup - generate")

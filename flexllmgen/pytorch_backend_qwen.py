@@ -13,8 +13,8 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 
-# from transformers.models.llama.modeling_llama import repeat_kv
-from transformers.models.llama.modeling_llama import apply_rotary_pos_emb
+
+from transformers.models.qwen3.modeling_qwen3 import apply_rotary_pos_emb
 
 from flexllmgen.utils import (GB, T, cpu_mem_stats, vector_gather,
     np_dtype_to_torch_dtype, torch_dtype_to_np_dtype,
@@ -322,7 +322,7 @@ class TorchDevice:
         return k_cache, v_cache
 
     def mha(self, inputs, attention_mask, w_q, w_k, w_v,
-            w_out, w_ln, n_head, donate, compress_cache, comp_config, eps, head_dim, num_key_value_groups, num_key_value_heads, position_embeddings):
+            w_out, w_ln, q_ln, k_ln, n_head, donate, compress_cache, comp_config, eps, head_dim, num_key_value_groups, num_key_value_heads, position_embeddings):
         """Multi-head attention (prefill phase)."""
         # decompress weights
         if w_q.device.device_type == DeviceType.COMPRESSED:
@@ -341,14 +341,19 @@ class TorchDevice:
         # print(hidden[:, :, :6])
 
         # shape: (b, s, h)
-        q = F.linear(hidden, w_q.data) * scaling
+        q = F.linear(hidden, w_q.data)
         k = F.linear(hidden, w_k.data)
         v = F.linear(hidden, w_v.data)
+
         # shape: (b, s, n_head, head_dim)
         q = q.view(b, s, n_head, head_dim)
 
-        k_single = k.view(b, s, num_key_value_heads, head_dim)
+        k = k.view(b, s, num_key_value_heads, head_dim)
         v_single = v.view(b, s, num_key_value_heads, head_dim)
+
+        # layer_norm of q,k
+        q = rms_norm(q, weight=q_ln.data, eps=eps) * scaling
+        k_single = rms_norm(k, weight=k_ln.data, eps=eps)
 
         cos, sin = position_embeddings
         q, k_single = apply_rotary_pos_emb(q, k_single, cos, sin, unsqueeze_dim=2)
@@ -406,7 +411,7 @@ class TorchDevice:
         return TorchTensor.create_from_torch(value, self), k, v
 
     def mha_gen(self, inputs, attention_mask, w_q, w_k, w_v,
-                w_out,  w_ln,  n_head, k_cache, v_cache, donate,
+                w_out,  w_ln,  q_ln, k_ln, n_head,  k_cache, v_cache, donate,
                 attn_sparsity, compress_cache, comp_config, eps, head_dim, num_key_value_groups, num_key_value_heads, position_embeddings):
         """Multi-head attention (decoding phase)."""
         # decompress weights
@@ -424,13 +429,18 @@ class TorchDevice:
         hidden = rms_norm(inputs.data, weight=w_ln.data, eps=eps)
 
         # shape: (b, 1, h)
-        q = F.linear(hidden, w_q.data) * scaling
+        q = F.linear(hidden, w_q.data)
         k = F.linear(hidden, w_k.data)
         v = F.linear(hidden, w_v.data)
+
         # shape: (b, 1, n_head, head_dim)
         q = q.view(b, tgt_s, n_head, head_dim)
-        k_single = k.view(b, tgt_s, num_key_value_heads, head_dim)
+        k = k.view(b, tgt_s, num_key_value_heads, head_dim)
         v_single = v.view(b, tgt_s, num_key_value_heads, head_dim)
+
+        # layer_norm of q,k
+        q = rms_norm(q, weight=q_ln.data, eps=eps) * scaling
+        k_single = rms_norm(k, weight=k_ln.data, eps=eps)
 
         cos, sin = position_embeddings
         q, k_single = apply_rotary_pos_emb(q, k_single, cos, sin, unsqueeze_dim=2)
