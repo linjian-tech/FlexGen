@@ -303,7 +303,7 @@ def download_llama_weights(model_name, path):
             name = name.replace("decoder.final_layer_norm", "decoder.layer_norm")
             param_path = os.path.join(path, name)
             with open(param_path, "wb") as f:
-                np.save(f, param.cpu().detach().to(torch.float32).numpy())
+                np.save(f, param.cpu().detach().to(torch.float16).numpy())
 
             # shared embedding
             if "decoder.embed_tokens.weight" in name:

@@ -616,6 +616,7 @@ class OptLM:
 
         self.position_embeddings = None
         self.config.pad_token_id = -1
+        self.config.torch_dtype = np.float16
         self.rotary_emb = LlamaRotaryEmbedding(config=config)
 
         layers = []
@@ -769,13 +770,13 @@ class OptLM:
             left, right = k * gpu_batch_size, (k + 1) * gpu_batch_size
             if i == 0:  # load from the input ids
                 val = dst.allocate((gpu_batch_size, self.task.prompt_len), np.int32)
-                # val.load_from_np(self.output_ids[left:right, :self.task.prompt_len])
-                val.data.copy_(torch.from_numpy(self.output_ids[left:right, :self.task.prompt_len]))
+                val.load_from_np(self.output_ids[left:right, :self.task.prompt_len])
+                # val.data.copy_(torch.from_numpy(self.output_ids[left:right, :self.task.prompt_len]))
             else:  # load from the last generated token
                 pos = self.task.prompt_len + i
                 val = dst.allocate((gpu_batch_size, 1), np.int32)
-                # val.load_from_np(self.output_ids[left:right, pos-1:pos])
-                val.data.copy_(torch.from_numpy(self.output_ids[left:right, pos-1:pos]))
+                val.load_from_np(self.output_ids[left:right, pos-1:pos])
+                # val.data.copy_(torch.from_numpy(self.output_ids[left:right, pos-1:pos]))
         else:  # load from the last layer
             val = self.hidden[i][j-1][k].pop().move(dst)
         self.hidden[i][j][k].store(val)
