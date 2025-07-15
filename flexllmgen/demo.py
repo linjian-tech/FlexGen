@@ -25,7 +25,6 @@ model = AutoModelForCausalLM.from_pretrained(
     model_name,
     torch_dtype=torch.float16,
     device_map="auto",
-    cache_dir="/media/hongzicong/volumn1/model_downloading"
 )
 prompt = "Can you tell me a joke?"
 inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
